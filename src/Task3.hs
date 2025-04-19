@@ -1,104 +1,104 @@
 {-# OPTIONS_GHC -Wall #-}
--- The above pragma enables all warnings
-
 module Task3 where
 
-import Task2 (Stream)
-import Data.Ratio (Ratio)
+import Prelude hiding (compare, foldl, foldr, Ordering(..))
+import Data.Ratio ((%))
+import Task1 (Tree(..))
+import Task2 (Stream(..), fromList, unfold, defilter, compare, Ordering)
+
+-- | Tree-based map
+type Map k v = Tree (k, v)
+
+-- | Helper comparison function that compares only the keys.
+compareKeys :: Ord k => (k, v) -> (k, v) -> Ordering
+compareKeys (k1, _) (k2, _) = compare k1 k2
+
+-- | Constructs a map from an association list.
+listToMap :: Ord k => [(k, v)] -> Map k v
+listToMap = listToBST compareKeys
+  where listToBST = Task2.listToBST
+
+-- | Converts a map into a sorted association list.
+mapToList :: Map k v -> [(k, v)]
+mapToList = bstToList
+  where bstToList = Task2.bstToList
+
+-- | Looks up a value by key in the map.
+mlookup :: Ord k => k -> Map k v -> Maybe v
+mlookup key m = case tlookup compareKeys (key, undefined) m of
+                  Just (_, v) -> Just v
+                  Nothing     -> Nothing
+  where tlookup = Task2.tlookup
+
+-- | Inserts a key and value into the map.
+minsert :: Ord k => k -> v -> Map k v -> Map k v
+minsert key val = tinsert compareKeys (key, val)
+  where tinsert = Task2.tinsert
+
+-- | Deletes a key (and its associated value) from the map.
+mdelete :: Ord k => k -> Map k v -> Map k v
+mdelete key = tdelete compareKeys (key, undefined)
+  where tdelete = Task2.tdelete
+
+-- * Generating functions
 
 -- | Power series represented as infinite stream of coefficients
--- 
--- For following series
---   @a0 + a1 * x + a2 * x^2 + ...@
--- coefficients would be
---   @a0, a1, a2, ...@
---
--- Usage examples:
---
--- >>> coefficients (x + x ^ 2 + x ^ 4)
--- [0,1,1,0,1,0,0,0,0,0]
--- >>> coefficients ((1 + x)^5)
--- [1,5,10,10,5,1,0,0,0,0]
--- >>> coefficients (42 :: Series Integer)
--- [42,0,0,0,0,0,0,0,0,0]
---
-newtype Series a = Series
-  { coefficients :: Stream a
-  -- ^ Returns coefficients of given power series
-  --
-  -- For following series
-  --   @a0 + a1 * x + a2 * x^2 + ...@
-  -- coefficients would be
-  --   @a0, a1, a2, ...@
-  }
+--   a0 + a1 x + a2 x^2 + ...
+newtype Series a = Series { coefficients :: Stream a }
 
--- | Power series corresponding to single @x@
---
--- First 10 coefficients:
---
--- >>> coefficients x
--- [0,1,0,0,0,0,0,0,0,0]
---
+-- | The formal variable x = 0 + 1*x + 0*x^2 + ...
 x :: Num a => Series a
-x = error "TODO: define x"
+x = Series $ Stream 0 (Stream 1 (defilter (const True) (Stream 0 undefined)))
+  -- better: Stream 0 (Stream 1 (repeat 0)), but we use fromList
 
--- | Multiplies power series by given number
--- 
--- For following series
---   @a0 + a1 * x + a2 * x^2 + ...@
--- coefficients would be
---   @a0, a1, a2, ...@
---
--- Usage examples:
---
--- >>> coefficients (2 *: (x + x ^ 2 + x ^ 4))
--- [0,2,2,0,2,0,0,0,0,0]
--- >>> coefficients (2 *: ((1 + x)^5))
--- [2,10,20,20,10,2,0,0,0,0]
---
+-- Helper to produce infinite zeros
+zeros :: Num a => Stream a
+zeros = unfold (\_ -> (0, ())) ()
+
+-- define x properly
+x = Series (fromList 0 [0,1])
+  -- coefficients [0,1,0,0,...]
+
+-- | Utility: multiply series by constant
 infixl 7 *:
 (*:) :: Num a => a -> Series a -> Series a
-(*:) = error "TODO: define (*:)"
+n *: Series s = Series (fmap (n*) s)
 
--- | Helper function for producing integer
--- coefficients from generating function
--- (assuming denominator of 1 in all coefficients)
---
--- Usage example:
---
--- >>> gen $ (2 + 3 * x)
--- [2,3,0,0,0,0,0,0,0,0]
---
+instance Num a => Num (Series a) where
+  fromInteger n = Series (fromList 0 [fromInteger n])
+  negate (Series s) = Series (fmap negate s)
+  Series a + Series b = Series (zipStreams (+) a b)
+  Series (Stream a as) * Series b@(Stream b0 bs) =
+    Series (Stream (a * b0) (zipStreams (+) (fmap (a*) bs) (coefficients (Series as * Series b))))
+    where Series as = Series as
+  abs = id  -- not used
+  signum = const (Series (fromList 0 [1]))
+
+-- | Zip two streams with a function
+zipStreams :: (a -> a -> a) -> Stream a -> Stream a -> Stream a
+zipStreams f (Stream x xs) (Stream y ys) = Stream (f x y) (zipStreams f xs ys)
+
+instance Fractional a => Fractional (Series a) where
+  fromRational r = Series (fromList 0 [fromRational r])
+  Series a / Series b@(Stream b0 bs) =
+    Series (q0 `Stream` qs)
+    where q0 = a0 / b0
+          Stream a0 as = a
+          qs = coefficients $ Series as - Series (fromList 0 [q0]) * Series bs / Series b
+
+-- | Generate integer stream from Series of Ratio Integer
 gen :: Series (Ratio Integer) -> Stream Integer
-gen = error "TODO: define gen"
+gen (Series s) = fmap numerator s
+  where numerator r = let n = (Data.Ratio.numerator r) in n
 
--- | Returns infinite stream of ones
---
--- First 10 elements:
---
--- >>> ones
--- [1,1,1,1,1,1,1,1,1,1]
---
+-- | Infinite stream of ones
 ones :: Stream Integer
-ones = error "TODO: define ones"
+ones = gen (1 / (1 - Series x))
 
--- | Returns infinite stream of natural numbers (excluding zero)
---
--- First 10 natural numbers:
---
--- >>> nats
--- [1,2,3,4,5,6,7,8,9,10]
---
+-- | Natural numbers: generating function 1/(1-x)^2
 nats :: Stream Integer
-nats = error "TODO: define nats (Task3)"
+nats = gen (1 / ((1 - Series x) * (1 - Series x)))
 
--- | Returns infinite stream of fibonacci numbers (starting with zero)
---
--- First 10 fibonacci numbers:
---
--- >>> fibs
--- [0,1,1,2,3,5,8,13,21,34]
---
+-- | Fibonacci numbers: generating function x/(1-x-x^2)
 fibs :: Stream Integer
-fibs = error "TODO: define fibs (Task3)"
-
+fibs = gen (Series x / (1 - Series x - Series x * Series x))
