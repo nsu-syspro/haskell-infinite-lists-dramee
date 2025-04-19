@@ -101,4 +101,3 @@ nats = error "TODO: define nats (Task3)"
 --
 fibs :: Stream Integer
 fibs = error "TODO: define fibs (Task3)"
-
